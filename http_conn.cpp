@@ -1,6 +1,6 @@
 #include "http_conn.h"
 
-#define DEBUG 1
+#define DEBUG 2
 
 const char *ok_200_title = "OK";
 const char *err_400_title = "Bad Request";
@@ -13,6 +13,7 @@ const char *error_500_title = "Internal Error";
 const char *error_500_form = "There was an unusual problem serving the requested file.\n";
 /* 网站根目录 */
 const char *doc_root = "./template/web";
+const char *cgi_root = "./template/cgi";
 
 /*
     设置文件描述符fd为非阻塞状态
@@ -41,7 +42,15 @@ void addFd(int epollfd, int fd, bool oneShot)
     }
     epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &event);
     setNonBlocking(fd);
+}
 
+
+int writePipe(int __fd, const void *__buf, size_t n){
+    return write(__fd, __buf, n);
+}
+
+int readPipe(int __fd, void *__buf, size_t __nbytes){
+    return read(__fd, __buf, __nbytes);
 }
 
 /*
@@ -117,7 +126,8 @@ void http_conn::init()
     memset(m_read_buf, '\0', READ_BUFFER_SIZE);
     memset(m_write_buf, '\0', WRITE_BUFFER_SIZE);
     memset(m_real_file, '\0', FILENAME_LEN);
-}
+    memset(m_cgi_buf, '\0', WRITE_BUFFER_SIZE);
+}   
 
 /*
     检查m_read_buf中合法的一行。
@@ -138,7 +148,7 @@ http_conn::LINE_STATUS http_conn::parse_line()
             {
                 return LINE_OPEN;
             }
-            else if (m_read_buf[m_check_idx+1] == '\n')
+            else if (m_read_buf[m_check_idx + 1] == '\n')
             {
                 m_read_buf[m_check_idx++] = '\0';
                 m_read_buf[m_check_idx++] = '\0';
@@ -168,12 +178,14 @@ http_conn::LINE_STATUS http_conn::parse_line()
 */
 bool http_conn::read()
 {
-    if(DEBUG){
+    if (DEBUG==1)
+    {
         printf("start read data form socket:\n");
     }
     if (m_read_idx >= READ_BUFFER_SIZE)
     {
-        if(DEBUG){
+        if (DEBUG==1)
+        {
             printf("读缓冲区不足:\n");
         }
         return false;
@@ -182,8 +194,9 @@ bool http_conn::read()
     int bytes_read = 0;
     while (true)
     {
-        if(DEBUG){
-            printf("当前缓冲区大小：%d, 已经使用：%d, 剩余：%d:\n", READ_BUFFER_SIZE, m_read_idx, READ_BUFFER_SIZE-m_read_idx);
+        if (DEBUG==1)
+        {
+            printf("当前缓冲区大小：%d, 已经使用：%d, 剩余：%d:\n", READ_BUFFER_SIZE, m_read_idx, READ_BUFFER_SIZE - m_read_idx);
         }
         bytes_read = recv(m_sockfd, m_read_buf + m_read_idx, READ_BUFFER_SIZE - m_read_idx, 0);
         if (bytes_read == -1)
@@ -192,21 +205,24 @@ bool http_conn::read()
             {
                 break;
             }
-            if(DEBUG){
+            if (DEBUG==1)
+            {
                 printf("读错误:\n");
             }
             return false;
         }
         else if (bytes_read == 0)
         {
-            if(DEBUG){
+            if (DEBUG==1)
+            {
                 printf("读0,对方已经关闭连接:\n");
             }
             return false;
         }
         m_read_idx += bytes_read;
     }
-    if(DEBUG){
+    if (DEBUG==1)
+    {
         printf("%s\n", m_read_buf);
     }
     return true;
@@ -233,12 +249,16 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char *text)
     *m_url++ = '\0';
 
     char *method = text;
+    
     if (strcasecmp(method, "GET") == 0)
     {
         m_method = GET;
     }
     else if (strcasecmp(method, "POST") == 0)
     {
+        if(DEBUG==1){
+            printf("method = POST\n");
+        }
         m_method = POST;
     }
     else
@@ -284,7 +304,7 @@ http_conn::HTTP_CODE http_conn::parse_headers(char *text)
 {
     if (text[0] == '\0')
     {
-        if (m_content_length != 0)
+        if (m_content_length != 0 || m_method == http_conn::POST)
         {
             m_chek_state = CHECK_STATE_CONTETE;
             return NO_REQUEST;
@@ -324,7 +344,22 @@ http_conn::HTTP_CODE http_conn::parse_content(char *text)
     if (m_read_idx >= (m_content_length + m_check_idx))
     {
         text[m_content_length] = '\0';
-        return GET_REQUEST;
+        // 如果是GET请求则直接忽略
+        if (m_method == http_conn::GET){
+            if(DEBUG==1){
+                printf("!!!!! return GET_REQUEST\n");
+            }
+            return GET_REQUEST;
+        }
+        else if (m_method == http_conn::POST)
+        {
+            if(DEBUG==1){
+                printf("!!!!! return POST_REQUEST\n");
+            }
+            // 记录POST请求
+            m_content_data = text;
+            return POST_REQUEST;
+        }
     }
     return NO_REQUEST;
 }
@@ -338,25 +373,28 @@ http_conn::HTTP_CODE http_conn::parse_content(char *text)
 */
 http_conn::HTTP_CODE http_conn::process_read()
 {
-    if(DEBUG){
+    if (DEBUG==1)
+    {
         printf("开始解析请求:\n");
     }
     LINE_STATUS line_status = LINE_OK;
     HTTP_CODE ret = NO_REQUEST;
     char *text = 0;
 
-    if(DEBUG){
+    if (DEBUG==1)
+    {
         printf("%d, %d\n", m_chek_state == CHECK_STATE_CONTETE, line_status == LINE_OK);
     }
     while (((m_chek_state == CHECK_STATE_CONTETE) && (line_status == LINE_OK)) ||
            ((line_status = parse_line()) == LINE_OK))
     {
-        if(DEBUG){
+        if (DEBUG==1)
+        {
             printf("执行解析:\n");
         }
         text = get_line();
         m_start_line = m_check_idx;
-        if (DEBUG)
+        if (DEBUG==1)
         {
             printf("get 1 http line : %s\n", text);
         }
@@ -390,9 +428,28 @@ http_conn::HTTP_CODE http_conn::process_read()
         case CHECK_STATE_CONTETE:
         {
             ret = parse_content(text);
+            if(DEBUG==1){
+                printf("CHECK_STATE_CONTETE = %d!\n", ret);
+            }
             if (ret == GET_REQUEST)
             {
+                if(DEBUG==1){
+                    printf("STATE = GET!\n");
+                }
+                if(DEBUG == 2){
+                    printf("GET : %s\n", m_url);
+                }
                 return do_request();
+            }
+            else if (ret == POST_REQUEST)
+            {
+                if(DEBUG==1){
+                    printf("STATE = POST!\n");
+                }
+                if(DEBUG == 2){
+                    printf("POST : %s\n", m_url);
+                }
+                return do_cgi_request();
             }
             line_status = LINE_OPEN;
             break;
@@ -407,18 +464,148 @@ http_conn::HTTP_CODE http_conn::process_read()
 }
 
 /*
+    查找cgi文件是否存在，并执行
+*/
+http_conn::HTTP_CODE http_conn::do_cgi_request()
+{
+    if(DEBUG==1){
+        printf("《==== POST请求处理 ====》\n");
+    }
+    // 确定cgi文件路径
+    strcpy(m_real_file, cgi_root);
+    int len = strlen(cgi_root);
+    strncpy(m_real_file + len, m_url, FILENAME_LEN - len - 1);
+
+    if (DEBUG==1)
+    {
+        printf("CGI路径: %s\n", m_real_file);
+    }
+
+    // 资源不存在
+    if (stat(m_real_file, &m_file_stat) < 0)
+    {
+        return NO_RESOURCE;
+    }
+    // 禁止读
+    if (!(m_file_stat.st_mode & S_IROTH))
+    { // S_IROTH 其它读
+        return FORBIDDEN_REQUEST;
+    }
+    // 如果是路径
+    if (S_ISDIR(m_file_stat.st_mode))
+    {
+        return BAD_REQUEST;
+    }
+    // 读取文件 映射到内存空间
+    if (DEBUG==1)
+    {
+        printf("find cgi successful!, post data = %s\n", m_content_data);
+    }
+    return execute_cgi();
+}
+
+/*
+    已确定cgi文件存在，现在执行cgi程序
+*/
+http_conn::HTTP_CODE http_conn::execute_cgi()
+{
+    /*
+        本函数实现思路如下：
+            1、在当前子线程中，fork一个子进程，并使用管道连接
+            2、关闭子进程中不必要的连接，并将管道读写文件描述符重定向为stdin和stdout
+            3、子进程执行execl，切换为cgi程序开始执行
+            4、cgi程序从stdin读取数据，从stdout返回数据
+            5、cgi程序执行完毕，应当回收子进程并且关闭管道释放资源
+    */
+
+    // 01 pipe与fork
+    int cgi_out[2]; // cgi程序读取管道
+    int cgi_in[2];  // cgi程序输入管道
+    pid_t pid; // 进程号
+
+    // 创建管道
+    if(pipe(cgi_in) < 0){
+        return INTERNAL_ERROR; // 服务器内部错误
+    }
+    if(pipe(cgi_out) < 0){
+        return INTERNAL_ERROR; // 服务器内部错误
+    }
+    if(DEBUG==1){
+        printf("thread: %ld, call: execute_cgi, msg: pipe create successful!\n", pthread_self());
+    }
+    if((pid = fork()) == 0){/* 该部分为子进程 */
+        close(cgi_out[0]); // pipe为单向通信
+        close(cgi_in[1]);
+
+        dup2(cgi_out[1], 1); // dup2 stdin
+        dup2(cgi_in[0], 0); // dup2 stdout  
+        
+        // 通过环境变量设置Content-Length传递
+        char content_env[30];
+        sprintf(content_env, "CONTENT_LENGTH=%d", m_content_length);
+        putenv(content_env);
+        execl(m_real_file, m_real_file, NULL);
+
+        if(DEBUG==1){
+            printf("thread: %ld, call: execute_cgi, msg: execute cgi failed!\n", pthread_self());
+        }
+        exit(1); // 执行成功时不应该到这
+
+    }else{/* 该部分为父进程 */
+        close(cgi_out[1]);
+        close(cgi_in[0]);
+
+        // 向cgi发送content内容，因为pipe是带缓存的，所以可以直接写入
+        if(DEBUG==1){
+            printf("thread: %ld, call: execute_cgi, msg: main process close pipe!\n", pthread_self());
+            printf("write data : %ld :  %s!\n", strlen(m_content_data), m_content_data);
+        }
+        int ret = writePipe(cgi_in[1], m_content_data, strlen(m_content_data));
+        if(DEBUG==1){
+            if(ret < 0){
+                printf("error : %s\n", strerror(errno));
+            }
+            //printf("thread: %ld, call: execute_cgi, msg: write data %d bytes!\n", pthread_self(), ret);
+        }
+        while (readPipe(cgi_out[0], m_cgi_buf + strlen(m_cgi_buf), WRITE_BUFFER_SIZE - strlen(m_cgi_buf) - 1) > 0)
+        {
+            // 不断读取管道中数据并存入缓存区中
+            if(DEBUG==1){
+                printf("thread: %ld, call: execute_cgi, msg: recv cgi data : %s", pthread_self(), m_cgi_buf);
+            }
+        }
+        close(cgi_in[1]);
+        close(cgi_out[0]);
+        int status = 0;
+        waitpid(pid, &status, 0);
+        if(status > 0){
+            return INTERNAL_ERROR;
+        }
+    }   
+    if(DEBUG==1){
+        printf("cgi exec successful!\n");
+    }
+    return CGI_REQUEST;
+}
+
+/*
     目前仅支持GET请求，解析URL，判断其是否可获取
+    读取静态文件，将其通过内存映射从内核态到用户态，减少IO操作次数
     返回值：
         FILE_REQUEST: 可获取（数据已加载到内存中)
         BAD_REQUEST： 不可获取
 */
 http_conn::HTTP_CODE http_conn::do_request()
 {
+    if(DEBUG==1){
+        printf("《==== GET请求处理 ====》\n");
+    }
     strcpy(m_real_file, doc_root);
     int len = strlen(doc_root);
     strncpy(m_real_file + len, m_url, FILENAME_LEN - len - 1);
 
-    if(DEBUG){
+    if (DEBUG==1)
+    {
         printf("路径: %s\n", m_real_file);
     }
 
@@ -541,7 +728,10 @@ bool http_conn::add_headers(int content_len)
     add_content_length(content_len);
     add_linger();
     add_blank_line();
+    return true;
 }
+
+
 
 /*
     写入Content-Length大小
@@ -649,6 +839,17 @@ bool http_conn::process_wirte(HTTP_CODE ret)
             }
         }
         break;
+    }
+    
+    case CGI_REQUEST:
+    {// 获取了cgi
+        add_status_line(200, ok_200_title);
+        add_headers(strlen(m_cgi_buf));
+        add_response(m_cgi_buf);
+        m_iv[0].iov_base = m_write_buf;
+        m_iv[0].iov_len = m_write_idx;
+        m_iv_count = 1;
+        return true;
     }
 
     default:

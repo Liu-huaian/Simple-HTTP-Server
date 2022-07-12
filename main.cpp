@@ -1,10 +1,11 @@
 #include "http_conn.h"
 #include "threadpool.h"
 
+const int thread_num = 8; // 线程池线程数目
+const short port = 9000; // 网络端口号
+const int MAX_FD = 65536; // 最大文件符数量
+const int MAX_EVENT_NUMBER = 10000; // 最大并发事件处理数
 
-const short port = 9000;
-const int MAX_FD = 65536;
-const int MAX_EVENT_NUMBER = 10000;
 
 // extern int addFd(int epollfd, int fd, bool one_shot);
 // extern int removefd(int epollfd, int fd);
@@ -40,7 +41,7 @@ int main()
 
     threadpool<http_conn>* pool = NULL;
     try{
-        pool = new threadpool<http_conn>;
+        pool = new threadpool<http_conn>(thread_num);
     }catch(...)
     {
         return 1;

@@ -20,6 +20,7 @@
 #include <errno.h>
 #include "locker.h"
 #include <sys/uio.h>
+#include <sys/wait.h>
 
 class http_conn
 {
@@ -57,10 +58,12 @@ public:
     {
         NO_REQUEST,
         GET_REQUEST,
+        POST_REQUEST,
         BAD_REQUEST,
         NO_RESOURCE,
         FORBIDDEN_REQUEST,
         FILE_REQUEST,
+        CGI_REQUEST,
         INTERNAL_ERROR, // 服务器内部错误
         CLOSED_CONNECTION
     };
@@ -102,6 +105,8 @@ private:
     HTTP_CODE parse_headers(char *text);
     HTTP_CODE parse_content(char *text);
     HTTP_CODE do_request();
+    HTTP_CODE do_cgi_request();
+    http_conn::HTTP_CODE execute_cgi();
     char *get_line(){
         return m_read_buf + m_start_line;
     };
@@ -139,6 +144,9 @@ private:
 
     /* 写缓冲区 */
     char m_write_buf[WRITE_BUFFER_SIZE];
+    /* cgi缓冲区 */
+    char m_cgi_buf[WRITE_BUFFER_SIZE];
+
     /* 写缓冲区待发送的字节数 */
     int m_write_idx;
 
@@ -159,6 +167,9 @@ private:
     int m_content_length;
     /* HTTP请求是否要保持连接 */
     bool m_linger;
+
+    /* POST请求的Content数据 */
+    char *m_content_data;
 
     /* 客户请求的目标文件被mmap到内存中的起始位置 */
     char *m_file_address;
