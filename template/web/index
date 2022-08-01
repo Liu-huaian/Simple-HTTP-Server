@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Index</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+<ul>
+  <li role="presentation" class="active"><a href="#">Home</a></li>
+  <li role="presentation"><a href="#">Profile</a></li>
+  <li role="presentation"><a href="#">Messages</a></li>
+</ul>
+
+<div>
+  <div class="starter-template">
+    <h1>首页</h1>
+    <p>本页面通过Get请求获取.<br>
+      至此CGI页面，请用POST方法请求.</p>
+
+    <p>
+      <a href="cgi"><b>CGI页面链接</b></a>
+    </p>
+  </div>
+</div><!-- /.container -->
+</body>
+</html>
