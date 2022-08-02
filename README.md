@@ -6,6 +6,7 @@
  `cd Simple-HTTP-Server/bin`  
  `cmake ..`  
  `make`  
+ `./main`
  
 ## 项目简介
 本项目基于Linux操作系统，使用C++语言实现了一个简单的HTTP服务器，支持用户通过GET请求获取静态资源和通过POST请求访问CGI。为了达到高性能服务器的要求，本项目主要采用了以下设计：
