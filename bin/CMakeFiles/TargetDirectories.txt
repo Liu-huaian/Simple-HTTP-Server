@@ -1,3 +1,0 @@
-/home/liuyu/webServer/web/bin/CMakeFiles/rebuild_cache.dir
-/home/liuyu/webServer/web/bin/CMakeFiles/edit_cache.dir
-/home/liuyu/webServer/web/bin/CMakeFiles/main.dir
